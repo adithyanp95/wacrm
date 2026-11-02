@@ -32,6 +32,8 @@ import {
   isTemplateWebhookField,
 } from '@/lib/whatsapp/template-webhook'
 import { applyMessageStatus } from '@/lib/whatsapp/message-status-sync'
+import { loadAiConfig } from '@/lib/ai/config'
+import { transcribeAudio } from '@/lib/ai/transcribe'
 
 // The `after()` callback in POST runs within this route's max duration.
 // Inbound processing can fan out to per-media Meta verification calls, so
@@ -648,7 +650,8 @@ async function processMessage(
     await parseMessageContent(
       message,
       accessToken,
-      mirrorMedia ? { accountId } : null
+      mirrorMedia ? { accountId } : null,
+      accountId
     )
 
   // Resolve swipe-reply context if present. A missing parent is fine —
@@ -937,7 +940,8 @@ async function parseMessageContent(
   accessToken: string,
   // Tenancy + opt-out for the media mirror. Null disables mirroring
   // entirely, which is what the account-level toggle does.
-  mirror: { accountId: string } | null
+  mirror: { accountId: string } | null,
+  targetAccountId?: string
 ): Promise<{
   contentText: string | null
   mediaUrl: string | null
@@ -1055,11 +1059,34 @@ async function parseMessageContent(
 
     case 'audio':
       if (message.audio?.id) {
+        const mediaId = message.audio.id;
+        const mediaType = message.audio.mime_type || 'audio/ogg';
+        let transcript: string | null = null;
+
+        if (targetAccountId) {
+          try {
+            const aiConfig = await loadAiConfig(supabaseAdmin(), targetAccountId, { requireActive: false });
+            if (aiConfig?.apiKey) {
+              const info = await getMediaUrl({ mediaId, accessToken });
+              const { buffer } = await downloadMedia({ downloadUrl: info.url, accessToken });
+              transcript = await transcribeAudio({
+                buffer,
+                fileName: 'audio.ogg',
+                mimeType: mediaType,
+                apiKey: aiConfig.apiKey,
+              });
+            }
+          } catch (transcribeErr) {
+            console.warn('[webhook] audio transcription skipped/failed:', transcribeErr);
+          }
+        }
+
         return {
           ...empty,
-          mediaUrl: await verifyAndBuildUrl(message.audio.id),
-          mediaType: message.audio.mime_type,
-        }
+          contentText: transcript,
+          mediaUrl: await verifyAndBuildUrl(mediaId),
+          mediaType,
+        };
       }
       return empty
 

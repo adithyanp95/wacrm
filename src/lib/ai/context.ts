@@ -25,7 +25,7 @@ export async function buildConversationContext(
     .from('messages')
     .select('sender_type, content_text')
     .eq('conversation_id', conversationId)
-    .eq('content_type', 'text')
+    .in('content_type', ['text', 'audio'])
     .order('created_at', { ascending: false })
     .limit(limit)
 
