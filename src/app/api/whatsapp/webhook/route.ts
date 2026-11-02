@@ -161,6 +161,17 @@ export async function GET(request: Request) {
       )
     }
 
+    // 1. Check environment variable fallback FIRST.
+    // If WHATSAPP_VERIFY_TOKEN is provided in the environment (e.g. Hostinger hPanel),
+    // we match it directly with zero dependencies on database decryption.
+    const envVerifyToken = process.env.WHATSAPP_VERIFY_TOKEN?.trim()
+    if (envVerifyToken && verifyTokenMatches(envVerifyToken, verifyToken)) {
+      return new Response(challenge, {
+        status: 200,
+        headers: { 'Content-Type': 'text/plain' },
+      })
+    }
+
     // Fetch all whatsapp configs to check verify tokens
     const { data: configs, error: configError } = await supabaseAdmin()
       .from('whatsapp_config')
@@ -222,7 +233,10 @@ export async function GET(request: Request) {
   } catch (error) {
     console.error('Error in webhook GET verification:', error)
     return NextResponse.json(
-      { error: 'Internal server error' },
+      {
+        error: 'Internal server error',
+        details: error instanceof Error ? error.message : String(error),
+      },
       { status: 500 }
     )
   }
