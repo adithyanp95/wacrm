@@ -69,7 +69,7 @@ describe('transcribeAudio & providers', () => {
       });
 
       expect(result).toBe('നിങ്ങളുടെ പ്ലാൻ ഡീറ്റെയിൽസ് ഒന്നു പറയാമോ?');
-      expect(capturedUrl).toContain('gemini-2.0-flash');
+      expect(capturedUrl).toContain('gemini-2.5-flash');
       expect(capturedUrl).toContain('key=gemini-secret-key');
       expect(capturedBody.contents[0].parts[0].inlineData.mimeType).toBe('audio/ogg');
       expect(capturedBody.contents[0].parts[0].inlineData.data).toBe(
