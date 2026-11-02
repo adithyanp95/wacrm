@@ -234,6 +234,7 @@ export async function POST() {
         header_type: headerType,
         header_content: header?.text ?? null,
         header_handle: header?.example?.header_handle?.[0] ?? null,
+        header_media_url: (header?.example?.header_handle?.[0]?.startsWith('http') ? header.example.header_handle[0] : null),
         body_text: body?.text ?? '',
         footer_text: footer?.text ?? null,
         buttons: parsedButtons.length ? parsedButtons : null,
