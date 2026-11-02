@@ -399,7 +399,16 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
 
       const config = configRows[0]
 
-      const decryptedAccessToken = decrypt(config.access_token)
+      let decryptedAccessToken: string
+      try {
+        decryptedAccessToken = decrypt(config.access_token)
+      } catch (err) {
+        console.error(
+          '[webhook] Failed to decrypt access_token for phone_number_id ' + phoneNumberId + '. Check ENCRYPTION_KEY:',
+          err
+        )
+        continue
+      }
 
       for (let i = 0; i < value.messages.length; i++) {
         const message = value.messages[i]

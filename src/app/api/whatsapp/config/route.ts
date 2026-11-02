@@ -575,7 +575,8 @@ export async function POST(request: Request) {
       return toErrorResponse(error)
     }
     console.error('Error in WhatsApp config POST:', error)
-    return NextResponse.json({ error: t('common.internalServerError') }, { status: 500 })
+    const message = error instanceof Error ? error.message : t('common.internalServerError')
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }
 
@@ -609,6 +610,7 @@ export async function DELETE() {
       return toErrorResponse(error)
     }
     console.error('Error in WhatsApp config DELETE:', error)
-    return NextResponse.json({ error: t('common.internalServerError') }, { status: 500 })
+    const message = error instanceof Error ? error.message : t('common.internalServerError')
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }
