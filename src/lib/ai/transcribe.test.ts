@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { transcribeAudio } from './transcribe';
+import { transcribeAudio, DEFAULT_MALAYALAM_PROMPT } from './transcribe';
 
 describe('transcribeAudio', () => {
   const originalFetch = globalThis.fetch;
@@ -26,12 +26,17 @@ describe('transcribeAudio', () => {
     expect(res2).toBeNull();
   });
 
-  it('posts to Whisper API and returns trimmed transcript', async () => {
+  it('posts to Whisper API with language ml and prompt and returns trimmed transcript', async () => {
     const mockResponse = { text: '  ഹലോ, എനിക്ക് ഒരു ചോദ്യമുണ്ട്  ' };
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => mockResponse,
-    } as unknown as Response);
+    let capturedBody: FormData | null = null;
+
+    globalThis.fetch = vi.fn().mockImplementation(async (_url, options) => {
+      capturedBody = options?.body as FormData;
+      return {
+        ok: true,
+        json: async () => mockResponse,
+      } as unknown as Response;
+    });
 
     const result = await transcribeAudio({
       buffer: Buffer.from('fake-audio-bytes'),
@@ -41,15 +46,11 @@ describe('transcribeAudio', () => {
     });
 
     expect(result).toBe('ഹലോ, എനിക്ക് ഒരു ചോദ്യമുണ്ട്');
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      'https://api.openai.com/v1/audio/transcriptions',
-      expect.objectContaining({
-        method: 'POST',
-        headers: {
-          Authorization: 'Bearer sk-test',
-        },
-      }),
-    );
+    expect(capturedBody).not.toBeNull();
+    const formData = capturedBody as unknown as FormData;
+    expect(formData.get('language')).toBe('ml');
+    expect(formData.get('prompt')).toBe(DEFAULT_MALAYALAM_PROMPT);
+    expect(formData.get('model')).toBe('whisper-1');
   });
 
   it('returns null on Whisper API error', async () => {
