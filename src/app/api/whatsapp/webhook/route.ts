@@ -1066,14 +1066,16 @@ async function parseMessageContent(
         if (targetAccountId) {
           try {
             const aiConfig = await loadAiConfig(supabaseAdmin(), targetAccountId, { requireActive: false });
-            if (aiConfig?.apiKey) {
+            const geminiKey = process.env.GEMINI_API_KEY;
+            if (aiConfig?.apiKey || geminiKey) {
               const info = await getMediaUrl({ mediaId, accessToken });
               const { buffer } = await downloadMedia({ downloadUrl: info.url, accessToken });
               transcript = await transcribeAudio({
                 buffer,
                 fileName: 'audio.ogg',
                 mimeType: mediaType,
-                apiKey: aiConfig.apiKey,
+                apiKey: aiConfig?.apiKey,
+                geminiApiKey: geminiKey,
               });
             }
           } catch (transcribeErr) {
