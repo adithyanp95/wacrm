@@ -925,12 +925,12 @@ async function processMessage(
     }).catch((err) => console.error('[automations] dispatch failed:', err))
   }
 
-  // AI auto-reply. Runs only for plain-text inbound the deterministic
-  // flow runner did NOT consume (flows win over the LLM), and only when
-  // the account has enabled it. Awaited inside `after()` (same reason as
-  // the webhook dispatch below); `dispatchInboundToAiReply` owns its
-  // eligibility gates + try/catch and never throws.
-  if (!contentConsumed && !interactiveReplyId && inboundText.trim()) {
+  // AI auto-reply. Runs for plain-text or interactive button taps that
+  // no deterministic flow or automation consumed (flows/automations win).
+  // Awaited inside `after()` (same reason as the webhook dispatch below);
+  // `dispatchInboundToAiReply` owns its eligibility gates + try/catch
+  // and never throws.
+  if (!contentConsumed && inboundText.trim()) {
     await dispatchInboundToAiReply({
       accountId,
       conversationId: conversation.id,
