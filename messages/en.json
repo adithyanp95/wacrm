@@ -17,7 +17,7 @@
     "linkInvalid": "That link couldn’t be used to sign you in. If you were confirming your email, it may already be verified — just sign in below. For a password reset, request a new link and open it in the same browser you requested it from."
   },
   "Sidebar": {
-    "title": "CRM Template for WhatsApp",
+    "title": "WASenda",
     "primaryNav": "Primary",
     "dashboard": "Dashboard",
     "inbox": "Inbox",
@@ -2412,7 +2412,7 @@
     }
   },
   "Metadata": {
-    "description": "Self-hostable CRM template for WhatsApp."
+    "description": "WASenda — WhatsApp CRM, live chat inbox, and customer management."
   },
   "Currency": {
     "USD": "US Dollar",
@@ -2934,5 +2934,15 @@
       "metaApiStatus": "Meta API error: {status}",
       "syncFailed": "Failed to sync templates"
     }
+  },
+  "Pwa": {
+    "installTitle": "Install WASenda",
+    "installDescription": "Install on your home screen or desktop for real-time WhatsApp notifications and distraction-free access.",
+    "installButton": "Install WASenda",
+    "laterButton": "Maybe Later",
+    "iosInstructions": "To install on iPhone/iPad: Tap the Share button ⎋ in Safari, then tap 'Add to Home Screen' ⊞.",
+    "featureInstant": "Quick 1-tap access",
+    "featureNotifications": "Real-time message alerts",
+    "featureFullscreen": "Full-screen app view"
   }
 }

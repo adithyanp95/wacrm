@@ -2934,5 +2934,15 @@
       "metaApiStatus": "Erro da API da Meta: {status}",
       "syncFailed": "Falha ao sincronizar os modelos"
     }
+  },
+  "Pwa": {
+    "installTitle": "Instalar o WASenda",
+    "installDescription": "Instale na tela inicial ou computador para notificações do WhatsApp em tempo real e acesso em tela cheia.",
+    "installButton": "Instalar o WASenda",
+    "laterButton": "Mais tarde",
+    "iosInstructions": "Para instalar no iPhone/iPad: Toque no botão Compartilhar ⎋ no Safari e selecione 'Adicionar à Tela de Início' ⊞.",
+    "featureInstant": "Acesso rápido com 1 toque",
+    "featureNotifications": "Alertas de mensagens em tempo real",
+    "featureFullscreen": "Visualização em tela cheia"
   }
 }

@@ -84,13 +84,24 @@ export function BrowserNotificationsCard({ className }: { className?: string }) 
     }
   };
 
-  const sendTest = () => {
+  const sendTest = async () => {
     try {
-      new Notification(t('testTitle'), {
+      const options: NotificationOptions = {
         body: t('testBody'),
-        icon: '/icon',
-        tag: 'wacrm-test-notification',
-      });
+        icon: '/icons/icon-192.png',
+        badge: '/icons/icon-192.png',
+        tag: 'wasenda-test-notification',
+      };
+
+      if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+        const reg = await navigator.serviceWorker.ready;
+        if (reg && typeof reg.showNotification === 'function') {
+          await reg.showNotification(t('testTitle'), options);
+          return;
+        }
+      }
+
+      new Notification(t('testTitle'), options);
     } catch {
       toast.error(t('unsupported'));
     }

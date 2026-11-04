@@ -6,6 +6,7 @@ import Script from "next/script";
 import "./globals.css";
 import { ThemeProvider } from "@/hooks/use-theme";
 import { ThemedToaster } from "@/components/themed-toaster";
+import { ServiceWorkerRegister } from "@/components/pwa/service-worker-register";
 import {
   DEFAULT_MODE,
   DEFAULT_THEME,
@@ -29,9 +30,15 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 const metadata: Metadata = {
+  applicationName: "WASenda",
   title: {
-    default: "wacrm",
-    template: "%s — wacrm",
+    default: "WASenda",
+    template: "%s — WASenda",
+  },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "WASenda",
   },
   robots: {
     index: false,
@@ -39,6 +46,7 @@ const metadata: Metadata = {
   },
   icons: {
     icon: [{ url: "/icon" }],
+    apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180" }],
   },
   formatDetection: {
     email: false,
@@ -119,6 +127,7 @@ export default async function RootLayout({
           <ThemeProvider>
             {children}
             <ThemedToaster />
+            <ServiceWorkerRegister />
           </ThemeProvider>
         </NextIntlClientProvider>
       </body>

@@ -18,6 +18,29 @@ import {
   type NotificationLabels,
 } from "@/lib/notifications/browser-notify";
 
+/** Play a subtle, non-intrusive two-tone message chime via Web Audio. */
+function playNotificationChime(): void {
+  try {
+    const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type = "sine";
+    const now = ctx.currentTime;
+    osc.frequency.setValueAtTime(587.33, now); // D5
+    osc.frequency.setValueAtTime(880, now + 0.1); // A5
+    gain.gain.setValueAtTime(0.15, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+    osc.start(now);
+    osc.stop(now + 0.35);
+  } catch (_e) {
+    // AudioContext blocked or unsupported
+  }
+}
+
 const serverSnapshot = () => false;
 
 /**
@@ -100,21 +123,31 @@ export function useBrowserNotifications(): void {
       );
 
       try {
-        const notification = new Notification(title, {
+        playNotificationChime();
+        const href = conversationHref(msg.conversation_id);
+        const options: NotificationOptions = {
           body,
-          // One alert per conversation: a second message from the same
-          // customer replaces the first instead of stacking.
           tag: msg.conversation_id,
-          icon: "/icon",
-        });
+          icon: "/icons/icon-192.png",
+          badge: "/icons/icon-192.png",
+          data: { url: href },
+        };
+
+        if (typeof window !== "undefined" && "serviceWorker" in navigator) {
+          const reg = await navigator.serviceWorker.ready;
+          if (reg && typeof reg.showNotification === "function") {
+            await reg.showNotification(title, options);
+            return;
+          }
+        }
+
+        const notification = new Notification(title, options);
         notification.onclick = () => {
           window.focus();
-          router.push(conversationHref(msg.conversation_id));
+          router.push(href);
           notification.close();
         };
       } catch (err) {
-        // Some browsers throw from the constructor (e.g. Android Chrome
-        // requires a service worker). Non-fatal.
         console.error("[useBrowserNotifications] failed to show:", err);
       }
     };

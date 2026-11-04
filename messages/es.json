@@ -2934,5 +2934,15 @@
       "metaApiStatus": "Error de la API de Meta: {status}",
       "syncFailed": "Error al sincronizar las plantillas"
     }
+  },
+  "Pwa": {
+    "installTitle": "Instalar WASenda",
+    "installDescription": "Instala en tu pantalla de inicio o escritorio para recibir notificaciones de WhatsApp en tiempo real y acceso a pantalla completa.",
+    "installButton": "Instalar WASenda",
+    "laterButton": "Más tarde",
+    "iosInstructions": "Para instalar en iPhone/iPad: Toca el botón Compartir ⎋ en Safari y selecciona 'Agregar a inicio' ⊞.",
+    "featureInstant": "Acceso rápido en 1 toque",
+    "featureNotifications": "Alertas de mensajes en tiempo real",
+    "featureFullscreen": "Vista de pantalla completa"
   }
 }
