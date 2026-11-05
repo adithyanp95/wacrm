@@ -1090,14 +1090,18 @@ async function parseMessageContent(
           try {
             const aiConfig = await loadAiConfig(supabaseAdmin(), targetAccountId, { requireActive: false });
             const geminiKey = process.env.GEMINI_API_KEY;
-            if (aiConfig?.apiKey || geminiKey) {
+            const openAiKey =
+              aiConfig?.provider === 'openai'
+                ? aiConfig.apiKey
+                : (process.env.OPENAI_API_KEY || aiConfig?.apiKey);
+            if (openAiKey || geminiKey) {
               const info = await getMediaUrl({ mediaId, accessToken });
               const { buffer } = await downloadMedia({ downloadUrl: info.url, accessToken });
               transcript = await transcribeAudio({
                 buffer,
                 fileName: 'audio.ogg',
                 mimeType: mediaType,
-                apiKey: aiConfig?.apiKey,
+                apiKey: openAiKey,
                 geminiApiKey: geminiKey,
               });
             }

@@ -121,9 +121,83 @@ describe('transcribeAudio & providers', () => {
       expect(geminiSpy).toHaveBeenCalledTimes(1);
       const calledUrl = geminiSpy.mock.calls[0][0];
       expect(calledUrl).toContain('generativelanguage.googleapis.com');
+      expect(calledUrl).toContain('gemini-2.5-flash');
     });
 
-    it('falls back to Whisper when Gemini fails', async () => {
+    it('retries Gemini on transient 500 error and succeeds on attempt 2', async () => {
+      let callCount = 0;
+      globalThis.fetch = vi.fn().mockImplementation(async (url) => {
+        callCount++;
+        if (callCount === 1) {
+          return {
+            ok: false,
+            status: 500,
+            text: async () => 'Internal Server Error',
+          } as unknown as Response;
+        }
+        return {
+          ok: true,
+          json: async () => ({
+            candidates: [
+              {
+                content: {
+                  parts: [{ text: 'രണ്ടാം ശ്രമത്തിൽ ലഭിച്ച മറുപടി' }],
+                },
+              },
+            ],
+          }),
+        } as unknown as Response;
+      });
+
+      const result = await transcribeAudio({
+        buffer: Buffer.from('voice-bytes'),
+        apiKey: 'openai-key',
+        geminiApiKey: 'gemini-key',
+      });
+
+      expect(result).toBe('രണ്ടാം ശ്രമത്തിൽ ലഭിച്ച മറുപടി');
+      expect(callCount).toBe(2);
+    });
+
+    it('cascades to secondary Gemini model (gemini-3.1-flash-lite) if first model fails', async () => {
+      const calledModels: string[] = [];
+      globalThis.fetch = vi.fn().mockImplementation(async (url) => {
+        const urlStr = String(url);
+        calledModels.push(urlStr);
+        if (urlStr.includes('gemini-2.5-flash')) {
+          return {
+            ok: false,
+            status: 503,
+            text: async () => 'High demand',
+          } as unknown as Response;
+        }
+        return {
+          ok: true,
+          json: async () => ({
+            candidates: [
+              {
+                content: {
+                  parts: [{ text: 'ഫ്ലാഷ് ലൈറ്റ് മോഡലിൽ നിന്നുള്ള മറുപടി' }],
+                },
+              },
+            ],
+          }),
+        } as unknown as Response;
+      });
+
+      const result = await transcribeAudio({
+        buffer: Buffer.from('voice-bytes'),
+        apiKey: 'openai-key',
+        geminiApiKey: 'gemini-key',
+      });
+
+      expect(result).toBe('ഫ്ലാഷ് ലൈറ്റ് മോഡലിൽ നിന്നുള്ള മറുപടി');
+      // gemini-2.5-flash was called twice (initial + 1 retry), then gemini-3.1-flash-lite was called and succeeded
+      expect(calledModels.filter((u) => u.includes('gemini-2.5-flash')).length).toBe(2);
+      expect(calledModels.filter((u) => u.includes('gemini-3.1-flash-lite')).length).toBe(1);
+    });
+
+    it('falls back to Whisper when Gemini fails across all models', async () => {
       let callCount = 0;
       globalThis.fetch = vi.fn().mockImplementation(async (url) => {
         callCount++;
@@ -147,7 +221,8 @@ describe('transcribeAudio & providers', () => {
       });
 
       expect(result).toBe('Whisper fallback transcript');
-      expect(callCount).toBe(2);
+      // 3 Gemini models * 2 attempts = 6 calls to Google, + 1 call to OpenAI Whisper = 7
+      expect(callCount).toBe(7);
     });
   });
 

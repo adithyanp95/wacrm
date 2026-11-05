@@ -1,6 +1,6 @@
 /**
  * Audio transcription service supporting:
- * 1. Google Gemini (gemini-2.0-flash) — Primary engine for Malayalam, Manglish, and regional languages.
+ * 1. Google Gemini (gemini-2.5-flash, gemini-3.1-flash-lite, gemini-3-flash-preview) — Primary engine for Malayalam, Manglish, and regional languages.
  *    Multimodal native audio understanding with state-of-the-art vocabulary and dialect accuracy.
  * 2. OpenAI Whisper (whisper-1) — Fallback engine with prompt-conditioned Malayalam/Manglish support.
  */
@@ -13,22 +13,123 @@ export interface TranscribeAudioArgs {
   geminiApiKey?: string; // Google Gemini key (primary)
   language?: string;
   prompt?: string;
+  retryDelayMs?: number;
 }
+
+export const GEMINI_TRANSCRIPTION_MODELS = [
+  'gemini-2.5-flash',
+  'gemini-3.1-flash-lite',
+  'gemini-3-flash-preview',
+];
 
 export const DEFAULT_GEMINI_TRANSCRIPTION_PROMPT =
   'Listen carefully to this WhatsApp voice message and transcribe it verbatim.\n' +
   '- The speaker is speaking in Malayalam, Manglish (Malayalam mixed with English), or English.\n' +
   '- Transcribe Malayalam words in clear, grammatically correct Malayalam script (മലയാളം ലിപി).\n' +
-  '- Retain common English business, marketing, or technical terms in English (e.g. Local SEO, Google Maps, package, pricing, audit, details, ranking).\n' +
-  '- Do NOT summarize, explain, or reply to the audio. Output ONLY the exact transcribed text.';
+  '- Retain common English marketing, advertising, and business terms in English (e.g. Meta Ads, Facebook & Instagram Ads, posters, creative, leads, campaigns, Diwali offer, 50% discount, ₹1,500/month, agency management fee, packages, budget, details).\n' +
+  '- Do NOT summarize, explain, translate, or reply to the audio. Output ONLY the exact transcribed text.';
 
 export const DEFAULT_MANGLISH_MALAYALAM_PROMPT =
-  'Malayalam and Manglish customer voice note (മലയാളം, Manglish). Topics: Local SEO, Google Maps 3-Pack, SEO packages, pricing, details, ethra maasam, business growth, client inquiry, സംഭാഷണം, പാക്കേജുകൾ, ഡിജിറ്റൽ മാർക്കറ്റിംഗ്, ഡീറ്റെയിൽസ്.';
+  'Malayalam and Manglish customer voice note (മലയാളം, Manglish). Topics: Meta Ads, Facebook Ads, Instagram Ads, campaigns, posters, creatives, Diwali offer, 50% discount, ₹1,500/month, package pricing, leads, business inquiries, details, ethra maasam, സംഭാഷണം, ഓഫർ, പരസ്യം, ഡീറ്റെയിൽസ്.';
 
 export const DEFAULT_MALAYALAM_PROMPT = DEFAULT_MANGLISH_MALAYALAM_PROMPT;
 
 /**
- * Transcribe audio using Google Gemini multimodal audio API (gemini-2.0-flash).
+ * Call a single Gemini model to transcribe audio.
+ * Supports transient error retries (429, 5xx, network error).
+ * Returns { transcript } on success, or { fatalAuthError: true } if API key is rejected (401/403).
+ */
+async function callGeminiModel(opts: {
+  model: string;
+  base64Data: string;
+  mimeType: string;
+  apiKey: string;
+  prompt: string;
+  retryDelayMs: number;
+}): Promise<{ transcript: string | null; fatalAuthError?: boolean }> {
+  const { model, base64Data, mimeType, apiKey, prompt, retryDelayMs } = opts;
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                {
+                  inlineData: {
+                    mimeType,
+                    data: base64Data,
+                  },
+                },
+                {
+                  text: prompt,
+                },
+              ],
+            },
+          ],
+        }),
+      });
+
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        console.warn(
+          `[gemini] model ${model} (attempt ${attempt}/2) failed with HTTP ${res.status}:`,
+          errText,
+        );
+
+        if (res.status === 401 || res.status === 403) {
+          // Authentication error; retrying other models with this key will also fail
+          return { transcript: null, fatalAuthError: true };
+        }
+
+        const isTransient = res.status === 429 || res.status >= 500;
+        if (!isTransient || attempt === 2) {
+          break;
+        }
+
+        if (retryDelayMs > 0) {
+          await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+        }
+        continue;
+      }
+
+      const data = (await res.json()) as {
+        candidates?: Array<{
+          content?: {
+            parts?: Array<{ text?: string }>;
+          };
+        }>;
+      };
+
+      const transcript =
+        data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null;
+      if (transcript) {
+        return { transcript };
+      }
+    } catch (err) {
+      console.warn(
+        `[gemini] model ${model} (attempt ${attempt}/2) network error:`,
+        err instanceof Error ? err.message : err,
+      );
+      if (attempt === 1 && retryDelayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+      }
+    }
+  }
+
+  return { transcript: null };
+}
+
+/**
+ * Transcribe audio using Google Gemini multimodal audio API.
+ * Uses primary model gemini-2.5-flash with automatic retry on transient errors
+ * and secondary fallbacks (gemini-3.1-flash-lite, gemini-3-flash-preview).
  * Excels at Indian languages, Malayalam script, and Manglish code-switching.
  */
 export async function transcribeWithGemini(args: {
@@ -36,70 +137,45 @@ export async function transcribeWithGemini(args: {
   mimeType?: string;
   apiKey: string;
   prompt?: string;
+  models?: string[];
+  retryDelayMs?: number;
 }): Promise<string | null> {
   const {
     buffer,
     mimeType = 'audio/ogg',
     apiKey,
     prompt = DEFAULT_GEMINI_TRANSCRIPTION_PROMPT,
+    models = GEMINI_TRANSCRIPTION_MODELS,
+    retryDelayMs = process.env.NODE_ENV === 'test' ? 0 : 400,
   } = args;
 
   if (!buffer || buffer.byteLength === 0 || !apiKey) {
     return null;
   }
 
-  try {
-    const base64Data = Buffer.from(buffer).toString('base64');
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+  const base64Data = Buffer.from(buffer).toString('base64');
 
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              {
-                inlineData: {
-                  mimeType,
-                  data: base64Data,
-                },
-              },
-              {
-                text: prompt,
-              },
-            ],
-          },
-        ],
-      }),
+  for (const model of models) {
+    const { transcript, fatalAuthError } = await callGeminiModel({
+      model,
+      base64Data,
+      mimeType,
+      apiKey,
+      prompt,
+      retryDelayMs,
     });
 
-    if (!res.ok) {
-      const errText = await res.text().catch(() => '');
-      console.warn('[gemini] audio transcription request failed:', res.status, errText);
-      return null;
+    if (transcript) {
+      return transcript;
     }
 
-    const data = (await res.json()) as {
-      candidates?: Array<{
-        content?: {
-          parts?: Array<{ text?: string }>;
-        };
-      }>;
-    };
-
-    const transcript =
-      data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null;
-    return transcript;
-  } catch (err) {
-    console.warn(
-      '[gemini] audio transcription error:',
-      err instanceof Error ? err.message : err,
-    );
-    return null;
+    if (fatalAuthError) {
+      console.warn('[gemini] Authentication failed; aborting Gemini model cascade.');
+      break;
+    }
   }
+
+  return null;
 }
 
 /**
@@ -169,13 +245,13 @@ export async function transcribeWithWhisper(
 export async function transcribeAudio(
   args: TranscribeAudioArgs,
 ): Promise<string | null> {
-  const { buffer, mimeType = 'audio/ogg', geminiApiKey, apiKey } = args;
+  const { buffer, mimeType = 'audio/ogg', geminiApiKey, apiKey, retryDelayMs } = args;
 
   if (!buffer || buffer.byteLength === 0) {
     return null;
   }
 
-  // 1. Prioritize Google Gemini (Gemini 2.0 Flash) for Malayalam / Manglish accuracy
+  // 1. Prioritize Google Gemini (primary: gemini-2.5-flash with resilient model cascade)
   const activeGeminiKey = geminiApiKey || process.env.GEMINI_API_KEY;
   if (activeGeminiKey) {
     const geminiTranscript = await transcribeWithGemini({
@@ -183,16 +259,22 @@ export async function transcribeAudio(
       mimeType,
       apiKey: activeGeminiKey,
       prompt: args.prompt || DEFAULT_GEMINI_TRANSCRIPTION_PROMPT,
+      retryDelayMs,
     });
 
     if (geminiTranscript) {
       return geminiTranscript;
     }
-    console.warn('[transcribe] Gemini transcription returned null, falling back to Whisper...');
+    console.warn(
+      '[transcribe] Gemini transcription failed across all attempted models.',
+    );
   }
 
-  // 2. Fall back to OpenAI Whisper
+  // 2. Fall back to OpenAI Whisper if configured
   if (apiKey) {
+    console.warn(
+      '[transcribe] Falling back to OpenAI Whisper. Note: Malayalam transcription accuracy may be degraded.',
+    );
     return transcribeWithWhisper(args);
   }
 
