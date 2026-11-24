@@ -18,12 +18,21 @@ import {
   type NotificationLabels,
 } from "@/lib/notifications/browser-notify";
 
+// One shared AudioContext: browsers cap how many a page may open, so a
+// new context per message stopped the chime after a handful of alerts.
+let chimeContext: AudioContext | null = null;
+
 /** Play a subtle, non-intrusive two-tone message chime via Web Audio. */
 function playNotificationChime(): void {
   try {
-    const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    if (!AudioCtx) return;
-    const ctx = new AudioCtx();
+    if (!chimeContext) {
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtx) return;
+      chimeContext = new AudioCtx();
+    }
+    const ctx = chimeContext;
+    // Autoplay policy may leave it suspended until a user gesture.
+    if (ctx.state === "suspended") void ctx.resume().catch(() => {});
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.connect(gain);
@@ -36,7 +45,7 @@ function playNotificationChime(): void {
     gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
     osc.start(now);
     osc.stop(now + 0.35);
-  } catch (_e) {
+  } catch {
     // AudioContext blocked or unsupported
   }
 }
@@ -134,8 +143,11 @@ export function useBrowserNotifications(): void {
         };
 
         if (typeof window !== "undefined" && "serviceWorker" in navigator) {
-          const reg = await navigator.serviceWorker.ready;
-          if (reg && typeof reg.showNotification === "function") {
+          // getRegistration() resolves at once (undefined when no worker
+          // is registered). `serviceWorker.ready` never resolves in that
+          // case, which silently swallowed every notification.
+          const reg = await navigator.serviceWorker.getRegistration();
+          if (reg?.active && typeof reg.showNotification === "function") {
             await reg.showNotification(title, options);
             return;
           }

@@ -14,6 +14,23 @@ export interface TranscribeAudioArgs {
   language?: string;
   prompt?: string;
   retryDelayMs?: number;
+  /** Epoch ms after which no new provider request is started. Each request
+   *  is also aborted at this point, so one hung call can't run past it. */
+  deadlineAt?: number;
+}
+
+/** Longest a single provider request may run. */
+export const TRANSCRIBE_REQUEST_TIMEOUT_MS = 15_000;
+/** Below this much remaining budget, a new attempt isn't worth starting. */
+const MIN_ATTEMPT_MS = 1_000;
+
+/** Abort signal for one request: the per-request cap or the overall
+ *  deadline, whichever comes first. Null when the budget is spent. */
+function requestSignal(deadlineAt: number | undefined): AbortSignal | null {
+  const remaining =
+    deadlineAt === undefined ? TRANSCRIBE_REQUEST_TIMEOUT_MS : deadlineAt - Date.now();
+  if (remaining < MIN_ATTEMPT_MS) return null;
+  return AbortSignal.timeout(Math.min(TRANSCRIBE_REQUEST_TIMEOUT_MS, remaining));
 }
 
 export const GEMINI_TRANSCRIPTION_MODELS = [
@@ -46,18 +63,27 @@ async function callGeminiModel(opts: {
   apiKey: string;
   prompt: string;
   retryDelayMs: number;
+  deadlineAt?: number;
 }): Promise<{ transcript: string | null; fatalAuthError?: boolean }> {
-  const { model, base64Data, mimeType, apiKey, prompt, retryDelayMs } = opts;
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const { model, base64Data, mimeType, apiKey, prompt, retryDelayMs, deadlineAt } = opts;
+  // The key goes in a header, not the query string: URLs end up in proxy
+  // and APM logs.
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
   for (let attempt = 1; attempt <= 2; attempt++) {
+    const signal = requestSignal(deadlineAt);
+    if (!signal) break;
     try {
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'x-goog-api-key': apiKey,
         },
+        signal,
         body: JSON.stringify({
+          // Verbatim transcription — no creativity wanted.
+          generationConfig: { temperature: 0 },
           contents: [
             {
               parts: [
@@ -139,6 +165,7 @@ export async function transcribeWithGemini(args: {
   prompt?: string;
   models?: string[];
   retryDelayMs?: number;
+  deadlineAt?: number;
 }): Promise<string | null> {
   const {
     buffer,
@@ -147,6 +174,7 @@ export async function transcribeWithGemini(args: {
     prompt = DEFAULT_GEMINI_TRANSCRIPTION_PROMPT,
     models = GEMINI_TRANSCRIPTION_MODELS,
     retryDelayMs = process.env.NODE_ENV === 'test' ? 0 : 400,
+    deadlineAt,
   } = args;
 
   if (!buffer || buffer.byteLength === 0 || !apiKey) {
@@ -163,6 +191,7 @@ export async function transcribeWithGemini(args: {
       apiKey,
       prompt,
       retryDelayMs,
+      deadlineAt,
     });
 
     if (transcript) {
@@ -191,9 +220,16 @@ export async function transcribeWithWhisper(
     apiKey,
     language,
     prompt = DEFAULT_MANGLISH_MALAYALAM_PROMPT,
+    deadlineAt,
   } = args;
 
   if (!buffer || buffer.byteLength === 0 || !apiKey) {
+    return null;
+  }
+
+  const signal = requestSignal(deadlineAt);
+  if (!signal) {
+    console.warn('[whisper] transcription budget spent; skipping Whisper.');
     return null;
   }
 
@@ -217,6 +253,7 @@ export async function transcribeWithWhisper(
       headers: {
         Authorization: `Bearer ${apiKey}`,
       },
+      signal,
       body: formData,
     });
 
@@ -245,7 +282,14 @@ export async function transcribeWithWhisper(
 export async function transcribeAudio(
   args: TranscribeAudioArgs,
 ): Promise<string | null> {
-  const { buffer, mimeType = 'audio/ogg', geminiApiKey, apiKey, retryDelayMs } = args;
+  const {
+    buffer,
+    mimeType = 'audio/ogg',
+    geminiApiKey,
+    apiKey,
+    retryDelayMs,
+    deadlineAt,
+  } = args;
 
   if (!buffer || buffer.byteLength === 0) {
     return null;
@@ -260,6 +304,7 @@ export async function transcribeAudio(
       apiKey: activeGeminiKey,
       prompt: args.prompt || DEFAULT_GEMINI_TRANSCRIPTION_PROMPT,
       retryDelayMs,
+      deadlineAt,
     });
 
     if (geminiTranscript) {

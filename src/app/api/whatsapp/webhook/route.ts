@@ -1,7 +1,7 @@
 import { NextResponse, after } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption'
-import { getMediaUrl, downloadMedia } from '@/lib/whatsapp/meta-api'
+import { getMediaUrl } from '@/lib/whatsapp/meta-api'
 import { mirrorInboundMedia } from '@/lib/whatsapp/mirror-inbound-media'
 import { normalizePhone } from '@/lib/whatsapp/phone-utils'
 import {
@@ -32,8 +32,7 @@ import {
   isTemplateWebhookField,
 } from '@/lib/whatsapp/template-webhook'
 import { applyMessageStatus } from '@/lib/whatsapp/message-status-sync'
-import { loadAiConfig } from '@/lib/ai/config'
-import { transcribeAudio } from '@/lib/ai/transcribe'
+import { transcribeInboundAudio } from '@/lib/ai/transcribe-inbound'
 
 // The `after()` callback in POST runs within this route's max duration.
 // Inbound processing can fan out to per-media Meta verification calls, so
@@ -669,13 +668,14 @@ async function processMessage(
   }
 
   // Parse message content based on type
-  const { contentText, mediaUrl, mediaType, interactiveReplyId } =
-    await parseMessageContent(
-      message,
-      accessToken,
-      mirrorMedia ? { accountId } : null,
-      accountId
-    )
+  const parsed = await parseMessageContent(
+    message,
+    accessToken,
+    mirrorMedia ? { accountId } : null
+  )
+  const { mediaUrl, mediaType, interactiveReplyId } = parsed
+  // `let`: a voice note's transcript is filled in after the row is saved.
+  let contentText = parsed.contentText
 
   // Resolve swipe-reply context if present. A missing parent is fine —
   // we just store NULL and the UI renders the message without a quote.
@@ -768,6 +768,32 @@ async function processMessage(
       message.id
     )
     return
+  }
+
+  // Voice note → transcript. Runs only now that the row is safely saved
+  // (a hung transcription used to hold up the insert until the route's
+  // 60 s budget ran out, losing the message for good). Bounded by
+  // INBOUND_TRANSCRIBE_BUDGET_MS and never throws. Done before the
+  // conversation bump, flows, automations and AI reply so they all see
+  // the transcript as the message text.
+  if (contentType === 'audio' && message.audio?.id) {
+    const transcript = await transcribeInboundAudio({
+      db: supabaseAdmin(),
+      accountId,
+      mediaId: message.audio.id,
+      mimeType: mediaType || 'audio/ogg',
+      accessToken,
+    })
+    if (transcript) {
+      contentText = transcript
+      const { error: transcriptErr } = await supabaseAdmin()
+        .from('messages')
+        .update({ content_text: transcript })
+        .eq('id', insertedRows[0].id)
+      if (transcriptErr) {
+        console.error('[webhook] failed to save voice-note transcript:', transcriptErr)
+      }
+    }
   }
 
   const isFirstInboundMessage = await claimFirstInboundMessage(
@@ -963,8 +989,7 @@ async function parseMessageContent(
   accessToken: string,
   // Tenancy + opt-out for the media mirror. Null disables mirroring
   // entirely, which is what the account-level toggle does.
-  mirror: { accountId: string } | null,
-  targetAccountId?: string
+  mirror: { accountId: string } | null
 ): Promise<{
   contentText: string | null
   mediaUrl: string | null
@@ -1081,41 +1106,15 @@ async function parseMessageContent(
       return empty
 
     case 'audio':
+      // Transcription is NOT done here: it runs in processMessage after
+      // the message row is saved, so a slow transcription can never cost
+      // us the message itself.
       if (message.audio?.id) {
-        const mediaId = message.audio.id;
-        const mediaType = message.audio.mime_type || 'audio/ogg';
-        let transcript: string | null = null;
-
-        if (targetAccountId) {
-          try {
-            const aiConfig = await loadAiConfig(supabaseAdmin(), targetAccountId, { requireActive: false });
-            const geminiKey = process.env.GEMINI_API_KEY;
-            const openAiKey =
-              aiConfig?.provider === 'openai'
-                ? aiConfig.apiKey
-                : (process.env.OPENAI_API_KEY || aiConfig?.apiKey);
-            if (openAiKey || geminiKey) {
-              const info = await getMediaUrl({ mediaId, accessToken });
-              const { buffer } = await downloadMedia({ downloadUrl: info.url, accessToken });
-              transcript = await transcribeAudio({
-                buffer,
-                fileName: 'audio.ogg',
-                mimeType: mediaType,
-                apiKey: openAiKey,
-                geminiApiKey: geminiKey,
-              });
-            }
-          } catch (transcribeErr) {
-            console.warn('[webhook] audio transcription skipped/failed:', transcribeErr);
-          }
-        }
-
         return {
           ...empty,
-          contentText: transcript,
-          mediaUrl: await verifyAndBuildUrl(mediaId),
-          mediaType,
-        };
+          mediaUrl: await verifyAndBuildUrl(message.audio.id),
+          mediaType: message.audio.mime_type || 'audio/ogg',
+        }
       }
       return empty
 

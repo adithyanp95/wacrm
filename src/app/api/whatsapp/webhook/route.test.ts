@@ -8,6 +8,7 @@ const h = vi.hoisted(() => ({
   dispatchInboundToAiReply: vi.fn(),
   dispatchWebhookEvent: vi.fn(),
   applyMessageStatus: vi.fn(),
+  transcribeInboundAudio: vi.fn(),
   state: {
     // Result the message upsert's .select() resolves to. A genuine insert
     // returns the row; a replayed delivery conflicts and returns [].
@@ -43,6 +44,8 @@ const h = vi.hoisted(() => ({
     broadcastRecipient: null as { id: string; status: string } | null,
     /** Patches applied to that broadcast_recipients row. */
     recipientUpdates: [] as Record<string, unknown>[],
+    /** Patches applied to a `messages` row (voice-note transcripts). */
+    messageUpdates: [] as { patch: Record<string, unknown>; id: unknown }[],
   },
 }))
 
@@ -193,6 +196,13 @@ vi.mock('@supabase/supabase-js', () => ({
                 }),
               }),
             }),
+            // Voice-note transcript: update({...}).eq('id', …)
+            update: (patch: Record<string, unknown>) => ({
+              eq: (_col: string, id: unknown) => {
+                h.state.messageUpdates.push({ patch, id })
+                return Promise.resolve({ error: null })
+              },
+            }),
             // Idempotent insert: upsert(...).select('id')
             upsert: (row: Record<string, unknown>, options: unknown) => {
               h.state.upsertCalls.push({ row, options })
@@ -266,6 +276,9 @@ vi.mock('@/lib/automations/engine', () => ({
 }))
 vi.mock('@/lib/flows/engine', () => ({
   dispatchInboundToFlows: h.dispatchInboundToFlows,
+}))
+vi.mock('@/lib/ai/transcribe-inbound', () => ({
+  transcribeInboundAudio: h.transcribeInboundAudio,
 }))
 vi.mock('@/lib/ai/auto-reply', () => ({
   dispatchInboundToAiReply: h.dispatchInboundToAiReply,
@@ -381,6 +394,8 @@ beforeEach(() => {
   h.state.whatsappConfigLookups = []
   h.state.broadcastRecipient = null
   h.state.recipientUpdates = []
+  h.state.messageUpdates = []
+  h.transcribeInboundAudio.mockResolvedValue(null)
   mockFindExistingContact.mockResolvedValue({
     id: 'contact-1',
     name: 'Ada',
@@ -652,6 +667,67 @@ describe('inbound webhook: inbound media is mirrored (#466)', () => {
     expect(mockGetMediaUrl).not.toHaveBeenCalled()
     expect(h.state.storageUploads).toHaveLength(0)
     expect(h.state.upsertCalls[0].row).toMatchObject({ media_type: null })
+  })
+})
+
+describe('inbound webhook: voice-note transcription', () => {
+  const AUDIO_MESSAGE = {
+    id: 'wamid.AUD1',
+    from: '15551230000',
+    timestamp: '1700000000',
+    type: 'audio',
+    audio: { id: '9876543210987654', mime_type: 'audio/ogg; codecs=opus' },
+  }
+
+  it('saves the message BEFORE transcribing, then fills in the transcript', async () => {
+    let upsertsWhenTranscribing = -1
+    h.transcribeInboundAudio.mockImplementation(async () => {
+      upsertsWhenTranscribing = h.state.upsertCalls.length
+      return 'ethra aanu package?'
+    })
+
+    await runWebhook(AUDIO_MESSAGE)
+
+    // The row already existed when transcription started, so a hung
+    // transcription can no longer lose the message.
+    expect(upsertsWhenTranscribing).toBe(1)
+    expect(h.state.upsertCalls[0].row).toMatchObject({
+      content_type: 'audio',
+      content_text: null,
+    })
+    expect(h.transcribeInboundAudio).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accountId: 'acc-1',
+        mediaId: '9876543210987654',
+        mimeType: 'audio/ogg; codecs=opus',
+      }),
+    )
+    expect(h.state.messageUpdates).toEqual([
+      { patch: { content_text: 'ethra aanu package?' }, id: 'msg-1' },
+    ])
+    // Everything downstream sees the transcript as the message text.
+    const bump = h.state.rpcCalls.find((c) => c.name === 'bump_conversation_on_inbound')
+    expect(bump?.args.p_last_message_text).toBe('ethra aanu package?')
+    expect(h.dispatchInboundToAiReply).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the message when transcription yields nothing', async () => {
+    h.transcribeInboundAudio.mockResolvedValue(null)
+
+    await runWebhook(AUDIO_MESSAGE)
+
+    expect(h.state.upsertCalls).toHaveLength(1)
+    expect(h.state.messageUpdates).toHaveLength(0)
+    // No text to answer → the AI stays quiet; a human sees the voice note.
+    expect(h.dispatchInboundToAiReply).not.toHaveBeenCalled()
+  })
+
+  it('does not transcribe a replayed delivery', async () => {
+    h.state.messageUpsertResult = []
+
+    await runWebhook(AUDIO_MESSAGE)
+
+    expect(h.transcribeInboundAudio).not.toHaveBeenCalled()
   })
 })
 

@@ -42,11 +42,16 @@ describe('transcribeAudio & providers', () => {
   describe('transcribeWithGemini', () => {
     it('sends base64 audio and prompt to Gemini 2.0 Flash and returns trimmed text', async () => {
       let capturedUrl = '';
-      let capturedBody: any = null;
+      let capturedBody: {
+        generationConfig?: unknown;
+        contents: { parts: { inlineData?: { mimeType: string; data: string }; text?: string }[] }[];
+      } = { contents: [] };
+      let capturedHeaders: Record<string, string> = {};
 
       globalThis.fetch = vi.fn().mockImplementation(async (url, options) => {
         capturedUrl = String(url);
         capturedBody = JSON.parse(options?.body as string);
+        capturedHeaders = options?.headers as Record<string, string>;
         return {
           ok: true,
           json: async () => ({
@@ -70,9 +75,12 @@ describe('transcribeAudio & providers', () => {
 
       expect(result).toBe('നിങ്ങളുടെ പ്ലാൻ ഡീറ്റെയിൽസ് ഒന്നു പറയാമോ?');
       expect(capturedUrl).toContain('gemini-2.5-flash');
-      expect(capturedUrl).toContain('key=gemini-secret-key');
-      expect(capturedBody.contents[0].parts[0].inlineData.mimeType).toBe('audio/ogg');
-      expect(capturedBody.contents[0].parts[0].inlineData.data).toBe(
+      // The key travels in a header, never in the (loggable) URL.
+      expect(capturedUrl).not.toContain('gemini-secret-key');
+      expect(capturedHeaders['x-goog-api-key']).toBe('gemini-secret-key');
+      expect(capturedBody.generationConfig).toEqual({ temperature: 0 });
+      expect(capturedBody.contents[0].parts[0].inlineData?.mimeType).toBe('audio/ogg');
+      expect(capturedBody.contents[0].parts[0].inlineData?.data).toBe(
         audioBuffer.toString('base64'),
       );
       expect(capturedBody.contents[0].parts[1].text).toBe(DEFAULT_GEMINI_TRANSCRIPTION_PROMPT);
@@ -311,6 +319,41 @@ describe('transcribeAudio & providers', () => {
       });
 
       expect(result).toBeNull();
+    });
+  });
+
+  describe('deadline', () => {
+    it('starts no request once the deadline has passed', async () => {
+      const fetchSpy = vi.fn();
+      globalThis.fetch = fetchSpy;
+
+      const result = await transcribeAudio({
+        buffer: Buffer.from('audio'),
+        geminiApiKey: 'gemini-key',
+        apiKey: 'sk-test',
+        deadlineAt: Date.now() - 1,
+      });
+
+      expect(result).toBeNull();
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it('passes an abort signal to every provider request', async () => {
+      const signals: unknown[] = [];
+      globalThis.fetch = vi.fn().mockImplementation(async (_url, options) => {
+        signals.push(options?.signal);
+        return { ok: false, status: 500, text: async () => '' } as unknown as Response;
+      });
+
+      await transcribeAudio({
+        buffer: Buffer.from('audio'),
+        geminiApiKey: 'gemini-key',
+        apiKey: 'sk-test',
+        deadlineAt: Date.now() + 10_000,
+      });
+
+      expect(signals.length).toBeGreaterThan(0);
+      for (const s of signals) expect(s).toBeInstanceOf(AbortSignal);
     });
   });
 });
