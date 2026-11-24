@@ -261,6 +261,17 @@ describe('dispatchInboundToAiReply — eligibility gates', () => {
     expect(assign?.isNull).toEqual(['assigned_agent_id'])
   })
 
+  it('stands down when the external agent owns replies (AI_AGENT_MODE=external)', async () => {
+    process.env.AI_AGENT_MODE = 'external'
+    try {
+      await dispatchInboundToAiReply(ARGS)
+      expect(h.generateReply).not.toHaveBeenCalled()
+      expect(h.engineSendText).not.toHaveBeenCalled()
+    } finally {
+      delete process.env.AI_AGENT_MODE
+    }
+  })
+
   it('logs the reason when it skips', async () => {
     const info = vi.spyOn(console, 'info').mockImplementation(() => {})
     h.state.autoResponders = [{ id: 'auto-1' }]

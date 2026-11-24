@@ -23,6 +23,7 @@ export type ApiErrorCode =
   | 'rate_limited' // per-key budget exhausted
   | 'bad_request' // malformed input
   | 'not_found'
+  | 'conflict' // the request is valid but the resource's state refuses it
   | 'internal'
   | 'unavailable';
 

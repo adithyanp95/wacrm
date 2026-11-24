@@ -14,6 +14,15 @@ import {
 import { sendTypingIndicator } from '@/lib/whatsapp/meta-api'
 import { checkRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
 
+/**
+ * True when `AI_AGENT_MODE=external`: replies come from the separate
+ * agent service through the /api/v1/agent bridge, and the built-in
+ * auto-reply stands down so the customer never gets two answers.
+ */
+export function isExternalAgentMode(): boolean {
+  return process.env.AI_AGENT_MODE?.trim().toLowerCase() === 'external'
+}
+
 interface DispatchArgs {
   /** Tenancy key — drives config, contact, and whatsapp_config lookups. */
   accountId: string
@@ -69,6 +78,10 @@ export async function dispatchInboundToAiReply(
     const config = await loadAiConfig(db, accountId)
     if (!config) return skip('AI is off or not configured')
     if (!config.autoReplyEnabled) return skip('auto-reply is disabled for the account')
+    // The separate agent service (agent/) owns replies. It still honours
+    // the same switches, pause flag, assignment and reply limit through
+    // the /api/v1/agent bridge, so the inbox banner keeps working.
+    if (isExternalAgentMode()) return skip('the external AI agent handles replies')
 
     // Deterministic, user-configured responders win over the LLM — the
     // caller already excludes messages a Flow consumed. Message-level
@@ -240,7 +253,7 @@ export async function dispatchInboundToAiReply(
  * so whoever picks it up has context. Assigning fires the
  * `on_conversation_assigned` trigger, which notifies the agent.
  */
-async function handOff(
+export async function handOff(
   db: ReturnType<typeof supabaseAdmin>,
   handoffAgentId: string | null,
   conversationId: string,

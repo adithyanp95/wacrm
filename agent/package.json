@@ -1,0 +1,23 @@
+{
+  "name": "wasenda-agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "WASenda AI salesperson: replies to WhatsApp leads through the CRM's /api/v1/agent bridge.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.2.0"
+  }
+}
