@@ -229,14 +229,44 @@ describe('dispatchInboundToAiReply — eligibility gates', () => {
     expect(h.engineSendText).not.toHaveBeenCalled()
   })
 
-  it('skips when the per-conversation cap is reached', async () => {
+  it('hands off instead of going silent when the reply limit is reached', async () => {
+    h.state.conv = {
+      assigned_agent_id: null,
+      ai_autoreply_disabled: false,
+      ai_reply_count: 3,
+    }
+    h.buildConversationContext.mockResolvedValue([
+      { role: 'user', content: 'ethra aanu package?' },
+    ])
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.generateReply).not.toHaveBeenCalled()
+    expect(h.engineSendText).not.toHaveBeenCalled()
+    expect(h.state.rpcCalls).toHaveLength(0)
+    // Paused with a note, so the banner shows "Resume AI" + the reason.
+    expect(h.state.updatePayload).toMatchObject({ ai_autoreply_disabled: true })
+    expect(h.state.updatePayload?.ai_handoff_summary).toContain('reply limit')
+    expect(h.state.updatePayload?.ai_handoff_summary).toContain('ethra aanu package?')
+  })
+
+  it('routes a reply-limit handoff to the configured handoff agent', async () => {
+    h.loadAiConfig.mockResolvedValue(aiConfig({ handoffAgentId: 'agent-7' }))
     h.state.conv = {
       assigned_agent_id: null,
       ai_autoreply_disabled: false,
       ai_reply_count: 3,
     }
     await dispatchInboundToAiReply(ARGS)
-    expect(h.engineSendText).not.toHaveBeenCalled()
+    const assign = h.state.updates.find((u) => 'assigned_agent_id' in u.payload)
+    expect(assign?.payload).toEqual({ assigned_agent_id: 'agent-7' })
+    expect(assign?.isNull).toEqual(['assigned_agent_id'])
+  })
+
+  it('logs the reason when it skips', async () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {})
+    h.state.autoResponders = [{ id: 'auto-1' }]
+    await dispatchInboundToAiReply(ARGS)
+    expect(info).toHaveBeenCalledWith(expect.stringContaining('automation answers instead'))
+    info.mockRestore()
   })
 
   it('skips when there is nothing to reply to', async () => {

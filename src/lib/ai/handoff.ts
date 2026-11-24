@@ -20,8 +20,11 @@ const MAX_QUOTE_LEN = 160
 export function buildHandoffSummary(args: {
   messages: ChatMessage[]
   replyCount: number
+  /** Why the bot stopped: the model asked for a human (default), or the
+   *  per-conversation reply limit was used up. */
+  reason?: 'model' | 'reply_limit'
 }): string {
-  const { messages, replyCount } = args
+  const { messages, replyCount, reason = 'model' } = args
 
   const lastCustomer = [...messages]
     .reverse()
@@ -32,7 +35,10 @@ export function buildHandoffSummary(args: {
       ? 'without replying'
       : `after ${replyCount} ${replyCount === 1 ? 'reply' : 'replies'}`
 
-  const base = `🤖 AI agent handed off ${replies}.`
+  const base =
+    reason === 'reply_limit'
+      ? `🤖 AI agent reached its reply limit ${replies} and handed off.`
+      : `🤖 AI agent handed off ${replies}.`
 
   if (!lastCustomer) return base
 

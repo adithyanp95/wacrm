@@ -63,4 +63,15 @@ describe('buildHandoffSummary', () => {
     })
     expect(summary).toBe('🤖 AI agent handed off without replying.')
   })
+
+  it('says the reply limit was reached for a reply-limit handoff', () => {
+    const summary = buildHandoffSummary({
+      messages: [{ role: 'user', content: 'price?' }],
+      replyCount: 20,
+      reason: 'reply_limit',
+    })
+    expect(summary).toBe(
+      '🤖 AI agent reached its reply limit after 20 replies and handed off. Last customer message: “price?”',
+    )
+  })
 })
