@@ -49,11 +49,14 @@ Add a new **Node.js app** from the same GitHub repo and the `deployment` branch:
 
 | Setting | Value |
 |---|---|
-| Root / app directory | `agent` |
+| Framework preset | **Express** (not Next.js) |
+| Root directory | `agent` |
 | Node version | 22 |
-| Build command | `npm install && npm run build` |
-| Start command | `npm start` |
-| Domain | e.g. `agent.yourdomain.com` |
+| Package manager | npm |
+| Entry file | `server.js` (the default) |
+| Domain | Hostinger's own `*.hostingersite.com` address, or e.g. `agent.yourdomain.com` |
+
+The Express preset has no build command, and none is needed: `npm install` compiles the TypeScript through the `postinstall` script, and `server.js` starts the compiled app.
 
 Environment variables (see `.env.example`): `WACRM_URL`, `WACRM_API_KEY`, `OPENAI_API_KEY`, and `WACRM_WEBHOOK_SECRET` (from step 4; redeploy after adding it).
 
