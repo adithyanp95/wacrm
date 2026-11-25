@@ -95,8 +95,7 @@ Send "META", then a voice note, from a phone that isn't assigned to anyone. You 
 ## Develop
 
 ```powershell
-cd agent
-npm install
-npm test
-npm run build
+npm run test:agent
 ```
+
+Run that from the repository root. The agent borrows the main project's test runner, so the server install (`agent/package.json`) contains no test tools, only `typescript` and `@types/node` for the build.

@@ -14,14 +14,10 @@
     "build": "tsc",
     "start": "node server.js",
     "dev": "tsc --watch",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@types/node": "^22.19.0",
     "typescript": "^5.7.0"
-  },
-  "devDependencies": {
-    "vitest": "^3.2.0"
   }
 }
