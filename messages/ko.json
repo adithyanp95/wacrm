@@ -351,6 +351,10 @@
       "unknown": "알 수 없음"
     },
     "messageThread": {
+      "resetTestChat": "Reset test chat",
+      "resetTestChatConfirm": "Reset this test chat? This permanently deletes the chat, its messages, and this contact with its tags, notes and deals. The next message from this number starts fresh.",
+      "resetTestChatDone": "Test chat reset",
+      "resetTestChatFailed": "Could not reset the test chat: {reason}",
       "backToConversations": "대화 목록으로 돌아가기",
       "hideContactPanel": "연락처 패널 숨기기",
       "showContactPanel": "연락처 패널 표시",

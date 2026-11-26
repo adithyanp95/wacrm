@@ -500,6 +500,16 @@ function InboxPageInner() {
     router.replace("/inbox", { scroll: false });
   }, [router]);
 
+  // A test-number chat was wiped server-side: drop it from the list and
+  // close the thread.
+  const handleTestChatReset = useCallback(
+    (conversationId: string) => {
+      setConversations((prev) => prev.filter((c) => c.id !== conversationId));
+      handleCloseConversation();
+    },
+    [handleCloseConversation],
+  );
+
 
   const handleMessagesLoaded = useCallback(
     (loaded: Message[], conversationId: string) => {
@@ -629,6 +639,7 @@ function InboxPageInner() {
             onRefresh={handleManualRefresh}
             contactPanelOpen={contactPanelOpen}
             onToggleContactPanel={handleToggleContactPanel}
+            onTestChatReset={handleTestChatReset}
           />
         </div>
 

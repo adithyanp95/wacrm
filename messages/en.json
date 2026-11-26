@@ -351,6 +351,10 @@
       "unknown": "Unknown"
     },
     "messageThread": {
+      "resetTestChat": "Reset test chat",
+      "resetTestChatConfirm": "Reset this test chat? This permanently deletes the chat, its messages, and this contact with its tags, notes and deals. The next message from this number starts fresh.",
+      "resetTestChatDone": "Test chat reset",
+      "resetTestChatFailed": "Could not reset the test chat: {reason}",
       "backToConversations": "Back to conversations",
       "hideContactPanel": "Hide contact panel",
       "showContactPanel": "Show contact panel",

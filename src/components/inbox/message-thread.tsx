@@ -27,6 +27,7 @@ import {
   RefreshCw,
   PanelRightOpen,
   PanelRightClose,
+  Trash2,
 } from "lucide-react";
 import { format, isToday, isYesterday, differenceInHours } from "date-fns";
 import { useTranslations } from "next-intl";
@@ -62,6 +63,9 @@ import {
 } from "@/lib/whatsapp/template-message-view";
 import { contactHandle } from "@/lib/whatsapp/wa-identity";
 import { resolveAssignmentResult } from "@/lib/inbox/assignment";
+import { configuredTestNumbers, isTestNumber } from "@/lib/inbox/test-reset";
+
+const TEST_NUMBERS = configuredTestNumbers();
 import {
   businessReactionOn,
   withBusinessReaction,
@@ -127,6 +131,12 @@ interface MessageThreadProps {
    */
   contactPanelOpen?: boolean;
   onToggleContactPanel?: () => void;
+  /**
+   * Called after a test-number chat was reset (deleted). The button only
+   * renders for numbers in NEXT_PUBLIC_TEST_PHONE_NUMBERS and when this
+   * callback is wired up.
+   */
+  onTestChatReset?: (conversationId: string) => void;
 }
 
 function formatDateSeparator(dateStr: string, t: ReturnType<typeof useTranslations>): string {
@@ -186,6 +196,7 @@ export function MessageThread({
   onRefresh,
   contactPanelOpen,
   onToggleContactPanel,
+  onTestChatReset,
 }: MessageThreadProps) {
   const t = useTranslations("Inbox.messageThread");
   const tTimer = useTranslations("Inbox.sessionTimer");
@@ -970,6 +981,31 @@ export function MessageThread({
     [conversation, onAssignChange, t],
   );
 
+  const [resettingTestChat, setResettingTestChat] = useState(false);
+  const handleTestChatReset = useCallback(async () => {
+    if (!conversation || !onTestChatReset) return;
+    if (!window.confirm(t("resetTestChatConfirm"))) return;
+
+    setResettingTestChat(true);
+    try {
+      const res = await fetch(
+        `/api/conversations/${conversation.id}/test-reset`,
+        { method: "POST" },
+      );
+      if (!res.ok) {
+        const payload = await res.json().catch(() => null);
+        throw new Error(payload?.error || `HTTP ${res.status}`);
+      }
+      toast.success(t("resetTestChatDone"));
+      onTestChatReset(conversation.id);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : t("networkError");
+      toast.error(t("resetTestChatFailed", { reason }));
+    } finally {
+      setResettingTestChat(false);
+    }
+  }, [conversation, onTestChatReset, t]);
+
   // Empty state — same WhatsApp-style doodle background as the active
   // thread below, so swapping between empty/selected doesn't change the
   // pattern under the user's eye.
@@ -1096,6 +1132,22 @@ export function MessageThread({
               <RefreshCw
                 className={cn("h-3.5 w-3.5", isRefreshing && "animate-spin")}
               />
+            </button>
+          )}
+
+          {/* Reset test chat — only for the owner's own test numbers
+              (NEXT_PUBLIC_TEST_PHONE_NUMBERS). Real customer chats never
+              show it, and the server refuses them too. */}
+          {onTestChatReset && isTestNumber(contact.phone, TEST_NUMBERS) && (
+            <button
+              type="button"
+              onClick={handleTestChatReset}
+              disabled={resettingTestChat}
+              aria-label={t("resetTestChat")}
+              title={t("resetTestChat")}
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-red-500/10 hover:text-red-400 disabled:opacity-60"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
             </button>
           )}
 
