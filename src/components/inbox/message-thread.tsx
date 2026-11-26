@@ -63,9 +63,21 @@ import {
 } from "@/lib/whatsapp/template-message-view";
 import { contactHandle } from "@/lib/whatsapp/wa-identity";
 import { resolveAssignmentResult } from "@/lib/inbox/assignment";
-import { configuredTestNumbers, isTestNumber } from "@/lib/inbox/test-reset";
+import { isTestNumber, parseTestNumbers } from "@/lib/inbox/test-reset";
 
-const TEST_NUMBERS = configuredTestNumbers();
+// Test numbers for the "Reset test chat" button, fetched once per page
+// load from the server (which reads them at runtime). Non-admins get 403
+// → empty list → no button.
+let testNumbersPromise: Promise<Set<string>> | null = null;
+function loadTestNumbers(): Promise<Set<string>> {
+  testNumbersPromise ??= fetch("/api/conversations/test-numbers")
+    .then((res) => (res.ok ? res.json() : { numbers: [] }))
+    .then((body: { numbers?: string[] }) =>
+      parseTestNumbers((body.numbers ?? []).join(",")),
+    )
+    .catch(() => new Set<string>());
+  return testNumbersPromise;
+}
 import {
   businessReactionOn,
   withBusinessReaction,
@@ -981,6 +993,18 @@ export function MessageThread({
     [conversation, onAssignChange, t],
   );
 
+  const [testNumbers, setTestNumbers] = useState<Set<string>>(() => new Set());
+  useEffect(() => {
+    if (!onTestChatReset) return;
+    let cancelled = false;
+    loadTestNumbers().then((set) => {
+      if (!cancelled) setTestNumbers(set);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [onTestChatReset]);
+
   const [resettingTestChat, setResettingTestChat] = useState(false);
   const handleTestChatReset = useCallback(async () => {
     if (!conversation || !onTestChatReset) return;
@@ -1136,9 +1160,9 @@ export function MessageThread({
           )}
 
           {/* Reset test chat — only for the owner's own test numbers
-              (NEXT_PUBLIC_TEST_PHONE_NUMBERS). Real customer chats never
+              (TEST_PHONE_NUMBERS on the server). Real customer chats never
               show it, and the server refuses them too. */}
-          {onTestChatReset && isTestNumber(contact.phone, TEST_NUMBERS) && (
+          {onTestChatReset && isTestNumber(contact.phone, testNumbers) && (
             <button
               type="button"
               onClick={handleTestChatReset}
