@@ -3,7 +3,13 @@ import { createHmac } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import { verifySignature } from './signature.js';
 import { ConversationScheduler } from './scheduler.js';
-import { buildSystemPrompt, parseDecision, toChatTurns, knowledgeQuery } from './brain.js';
+import {
+  buildSystemPrompt,
+  humanizePunctuation,
+  parseDecision,
+  toChatTurns,
+  knowledgeQuery,
+} from './brain.js';
 import { runTurn, type TurnDeps } from './turn.js';
 import { CrmError, type AgentContext, type Crm } from './crm.js';
 import { createAgentServer } from './server.js';
@@ -146,7 +152,7 @@ describe('brain', () => {
     expect(p).toContain('We run Meta Ads.');
     expect(p).toContain('[1] Starter plan: ₹3,000/month');
     expect(p).toContain('"Ada"');
-    expect(p).toContain('Never claim to be a human');
+    expect(p).toContain('never claim to be human');
     expect(p).toContain('"action":"handoff"');
   });
 
@@ -278,6 +284,37 @@ describe('runTurn', () => {
     const crm = fakeCrm(context());
     crm.knowledge.mockRejectedValue(new Error('down'));
     expect(await runTurn(deps(crm, '{"action":"reply","messages":["Hi"]}'), 'c1')).toBe('replied');
+  });
+});
+
+describe('texting style fixes (live test, 2026-11-26)', () => {
+  it('turns long dashes between words into commas, but keeps number ranges', () => {
+    expect(humanizePunctuation('Starter plan ₹3,000/month aanu — 1 campaign, 4 posters')).toBe(
+      'Starter plan ₹3,000/month aanu, 1 campaign, 4 posters',
+    );
+    expect(humanizePunctuation('report send cheyyum—free plan share cheyyatte?')).toBe(
+      'report send cheyyum, free plan share cheyyatte?',
+    );
+    expect(humanizePunctuation('enquiries in 1–2 weeks')).toBe('enquiries in 1–2 weeks');
+    expect(humanizePunctuation('Sure – the team will call')).toBe('Sure, the team will call');
+    expect(humanizePunctuation('— hello —')).toBe('hello');
+  });
+
+  it('applies the dash fix to every message the model sends', () => {
+    const d = parseDecision('{"action":"reply","messages":["Starter ₹3,000 aanu — weekly report undu."]}');
+    expect(d.messages).toEqual(['Starter ₹3,000 aanu, weekly report undu.']);
+  });
+
+  it('prompt carries the respect, honesty, language, no-repeat and no-dash rules', () => {
+    const p = buildSystemPrompt({ businessPrompt: null, knowledge: [], contactName: null });
+    expect(p).toContain('never nee, ninte, ninakku or ninne');
+    expect(p).toContain('you are the business\'s AI assistant');
+    expect(p).toContain('Never say or hint that you are not a bot');
+    expect(p).toContain("EVERY message you send is in the lead's language");
+    expect(p).toContain('Never repeat the question or offer from your previous message');
+    expect(p).toContain('Never use long dashes');
+    // The scaffold itself must not model the dash habit it forbids.
+    expect(p.replace('(— or –)', '')).not.toMatch(/\s—\s/);
   });
 });
 
