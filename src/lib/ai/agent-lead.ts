@@ -404,7 +404,9 @@ export async function applyLeadUpdate(
       pipeline_id: pipeline.pipelineId,
       stage_id: pipeline.stageIds.get(firstStage),
       contact_id: contactId,
-      conversation_id: conversationId,
+      // No conversation_id on purpose: deals.conversation_id has no ON
+      // DELETE rule, so linking it would block deleting the chat (and
+      // the contact). The silent check finds the chat via the contact.
       title: `${contact?.name || contact?.phone || 'Lead'} — AI lead`,
       value: update.deal_value ?? 0,
       currency: acct?.default_currency ?? 'INR',
@@ -544,15 +546,14 @@ export async function sweepSilentLeads(
 
   const { data: deals } = await db
     .from('deals')
-    .select('id, contact_id, conversation_id, stage_id')
+    .select('id, contact_id, stage_id')
     .eq('account_id', accountId)
     .eq('pipeline_id', pipelineId)
     .eq('status', 'open')
     .limit(500)
   const rows = (deals ?? []) as {
     id: string
-    contact_id: string
-    conversation_id: string | null
+    contact_id: string | null // null once the contact was deleted
     stage_id: string
   }[]
 
@@ -565,14 +566,24 @@ export async function sweepSilentLeads(
   let marked = 0
 
   for (const deal of rows) {
-    if (!deal.conversation_id) continue
+    if (!deal.contact_id) continue
     const tags = await contactTagIds(db, deal.contact_id)
     if ([...skipTags.values()].some((id) => tags.has(id))) continue
+
+    // The contact's chat (one per contact per account).
+    const { data: convs } = await db
+      .from('conversations')
+      .select('id')
+      .eq('account_id', accountId)
+      .eq('contact_id', deal.contact_id)
+      .limit(1)
+    const conversationId = convs?.[0]?.id as string | undefined
+    if (!conversationId) continue
 
     const { data: last } = await db
       .from('messages')
       .select('sender_type, created_at')
-      .eq('conversation_id', deal.conversation_id)
+      .eq('conversation_id', conversationId)
       .order('created_at', { ascending: false })
       .limit(1)
     const msg = last?.[0] as { sender_type: string; created_at: string } | undefined

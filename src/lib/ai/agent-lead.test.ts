@@ -121,11 +121,13 @@ describe('applyLeadUpdate', () => {
     expect(tables.deals).toHaveLength(1)
     expect(tables.deals[0]).toMatchObject({
       contact_id: 'contact-1',
-      conversation_id: 'conv-1',
       currency: 'INR',
       status: 'open',
       title: 'Ada — AI lead',
     })
+    // Never linked to the chat: that foreign key has no ON DELETE rule
+    // and would block deleting the chat or the contact.
+    expect(tables.deals[0]).not.toHaveProperty('conversation_id')
     expect(stageNameOf(tables.deals[0])).toBe('Talking')
 
     expect(hasTag('contact-1', 'Warm')).toBe(true)
