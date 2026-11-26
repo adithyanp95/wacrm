@@ -44,8 +44,23 @@ function main(): void {
 
   server.listen(config.port, () => log('agent listening', { port: config.port }));
 
+  // Outcome timer: tag AI leads that stopped replying as "Silent". Rule-
+  // based on the CRM side (no AI call); first run a minute after start.
+  const silentCheck = async () => {
+    try {
+      const res = await crm.silentSweep(config.silentAfterHours);
+      if (res.marked > 0) log('silent check', res);
+    } catch (err) {
+      log('silent check failed', { error: String(err) });
+    }
+  };
+  const firstCheck = setTimeout(silentCheck, 60_000);
+  const checkTimer = setInterval(silentCheck, config.silentCheckMinutes * 60_000);
+
   const shutdown = () => {
     log('shutting down');
+    clearTimeout(firstCheck);
+    clearInterval(checkTimer);
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 5000).unref();
   };

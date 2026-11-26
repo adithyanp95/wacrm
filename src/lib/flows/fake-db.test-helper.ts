@@ -92,6 +92,24 @@ export function createFakeDb(tables: FakeTables, failingTables: ReadonlySet<stri
         tables[table].push(...inserted);
         return builder;
       },
+      // Insert-or-update on the `onConflict` columns (comma-separated).
+      upsert: (values: Row | Row[], opts?: { onConflict?: string }) => {
+        op = "insert";
+        const keys = (opts?.onConflict ?? "id").split(",").map((k) => k.trim());
+        const list = Array.isArray(values) ? values : [values];
+        inserted = list.map((v) => {
+          const existing = tables[table].find((r) => keys.every((k) => r[k] === v[k]));
+          if (existing) {
+            Object.assign(existing, structuredClone(v));
+            return existing;
+          }
+          idCounter += 1;
+          const row = { id: `gen-${idCounter}`, ...v };
+          tables[table].push(row);
+          return row;
+        });
+        return builder;
+      },
       maybeSingle: async () => {
         const result = execute();
         const data = Array.isArray(result.data) ? (result.data[0] ?? null) : null;

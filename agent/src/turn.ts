@@ -1,4 +1,4 @@
-import { CrmError, type Crm } from './crm.js';
+import { CrmError, type Crm, type LeadUpdate } from './crm.js';
 import {
   buildSystemPrompt,
   callOpenAi,
@@ -61,6 +61,7 @@ export async function runTurn(deps: TurnDeps, conversationId: string): Promise<T
     businessPrompt: ctx.business_prompt,
     knowledge,
     contactName: ctx.contact?.name ?? null,
+    lead: ctx.lead,
   });
   const model = ctx.model || deps.defaultModel;
 
@@ -83,6 +84,10 @@ export async function runTurn(deps: TurnDeps, conversationId: string): Promise<T
     }
     await crm.handoff(conversationId, decision.summary);
     log('handed off', { conversationId });
+    await saveLead(deps, conversationId, {
+      ...decision.lead,
+      note: decision.summary ? `Handed to the team: ${decision.summary}` : undefined,
+    });
     return 'handed_off';
   }
 
@@ -90,16 +95,37 @@ export async function runTurn(deps: TurnDeps, conversationId: string): Promise<T
   if (outcome === 'reply_limit') {
     await crm.handoff(conversationId, 'Reached the AI reply limit for this conversation.');
     log('reply limit — handed off', { conversationId });
+    await saveLead(deps, conversationId, decision.lead);
     return 'handed_off';
   }
   if (outcome === 'stale') {
     // The lead wrote again while we were thinking; that message's own
-    // webhook has already scheduled a fresh turn that will see it.
+    // webhook has already scheduled a fresh turn that will see it (and
+    // will report the lead details then).
     log('stale — newer message will be answered', { conversationId });
     return 'stale';
   }
   log('replied', { conversationId, parts: decision.messages.length });
+  await saveLead(deps, conversationId, decision.lead);
   return 'replied';
+}
+
+/**
+ * Save what the agent learned to the CRM. Strictly best-effort: the
+ * lead already has their reply, so a failed CRM update is only logged.
+ */
+async function saveLead(
+  deps: TurnDeps,
+  conversationId: string,
+  update: LeadUpdate | null,
+): Promise<void> {
+  if (!update || Object.values(update).every((v) => v === undefined)) return;
+  try {
+    const applied = await deps.crm.updateLead(conversationId, update);
+    deps.log('lead updated', { conversationId, applied });
+  } catch (err) {
+    deps.log('lead update failed', { conversationId, error: String(err) });
+  }
 }
 
 async function sendReply(

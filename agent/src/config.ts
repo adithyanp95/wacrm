@@ -10,6 +10,10 @@ export interface AgentConfig {
   maxWaitMs: number;
   /** Per OpenAI request. */
   llmTimeoutMs: number;
+  /** A lead counts as "Silent" after this long without replying to us. */
+  silentAfterHours: number;
+  /** How often to run the silent check. */
+  silentCheckMinutes: number;
 }
 
 const REQUIRED = ['WACRM_URL', 'WACRM_API_KEY', 'WACRM_WEBHOOK_SECRET', 'OPENAI_API_KEY'] as const;
@@ -39,5 +43,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AgentConfig {
     debounceMs: int(env.DEBOUNCE_MS, 10_000),
     maxWaitMs: int(env.MAX_WAIT_MS, 30_000),
     llmTimeoutMs: int(env.LLM_TIMEOUT_MS, 45_000),
+    silentAfterHours: int(env.SILENT_AFTER_HOURS, 72),
+    silentCheckMinutes: int(env.SILENT_CHECK_MINUTES, 60),
   };
 }

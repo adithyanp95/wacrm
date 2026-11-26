@@ -27,6 +27,20 @@ The CRM enforces every rule (AI on/off, **Take over**, pause, reply limit, stale
 
 Logs contain ids and outcomes only, never message text.
 
+## What it records in the CRM
+
+The same model call that writes the reply also reports what it learned about the lead. After the reply is sent, that's saved (best-effort; a failed save never affects the reply):
+
+| Where | What |
+|---|---|
+| Contact fields | Business type, Location, Ads before?, Main goal, Monthly ad budget, Interested plan, Main doubt, AI summary |
+| Tags | One interest tag (**Hot** / **Warm** / **Cold**), swapped as interest changes; tag automations still fire |
+| Pipeline | An **AI Sales** pipeline (New lead → Talking → Price shared → Proof shared → Ready to start) with one deal per lead, moved forward only |
+| Outcome | **Lost** / **Not a fit** from the chat (deal closed as lost, note with the reason). **Silent** from a timer: no reply for `SILENT_AFTER_HOURS`, with a note on where they stopped. **Won** is set by the team (deal → Won) |
+| Notes | Handoff summaries and outcomes |
+
+Fields, tags and the pipeline are created on first use. The agent only touches contacts it talks to, and never removes the team's own tags, fields or notes. What's saved is read back on the next turn, so the agent doesn't ask the same thing twice.
+
 ## Set it up (Hostinger)
 
 Do the steps in this order, so there's never a gap where nobody replies.
@@ -90,7 +104,7 @@ Send "META", then a voice note, from a phone that isn't assigned to anyone. You 
 
 - The CRM sends each webhook once. If the agent is down at that moment, that message isn't answered until the lead writes again. A catch-up sweep is planned.
 - Pending turns live in memory, so a redeploy drops any turn that was waiting out its 10 s debounce.
-- No lead memory, CRM write-back, research or voice replies yet (Phases 2–4).
+- No automatic follow-ups yet (planned once there's real campaign data), research, or voice replies.
 
 ## Develop
 

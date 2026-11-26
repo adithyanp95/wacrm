@@ -20,6 +20,7 @@ import { buildHandoffSummary } from './handoff'
 import { engineSendText, loadAccountMetaCredentials } from '@/lib/flows/meta-send'
 import { sendTypingIndicator } from '@/lib/whatsapp/meta-api'
 import type { AiConfig } from './types'
+import { getLeadProfile, type LeadProfile } from './agent-lead'
 
 /** Messages of these types carry text worth showing the model
  *  (voice notes carry their transcript). */
@@ -71,6 +72,9 @@ export interface AgentContext {
   /** Settings → AI model, so one place controls which model runs. */
   model: string | null
   latest_customer_message_id: string | null
+  /** What the CRM already knows about this lead (fields, interest tag,
+   *  AI Sales stage, outcome) — the agent's memory. Null if unavailable. */
+  lead: LeadProfile | null
   /** Oldest first. */
   messages: {
     role: 'user' | 'assistant'
@@ -184,6 +188,10 @@ export async function getAgentContext(
     business_prompt: config?.systemPrompt ?? null,
     model: config?.model ?? null,
     latest_customer_message_id: latestCustomerMessageId(rows),
+    lead: await getLeadProfile(db, accountId, conv.contact_id).catch((err) => {
+      console.warn('[agent-bridge] lead profile unavailable:', err)
+      return null
+    }),
     messages: rows
       .filter((m) => TEXT_TYPES.has(m.content_type) && m.content_text?.trim())
       .map((m) => ({
@@ -288,7 +296,7 @@ export async function sendAgentReply(
   return { whatsapp_message_ids: ids }
 }
 
-async function whatsappConfigOwner(db: SupabaseClient, accountId: string): Promise<string> {
+export async function whatsappConfigOwner(db: SupabaseClient, accountId: string): Promise<string> {
   const { data } = await db
     .from('whatsapp_config')
     .select('user_id')

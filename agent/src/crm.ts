@@ -10,6 +10,39 @@ export type BlockedReason =
   | 'paused'
   | 'reply_limit';
 
+export type Temperature = 'hot' | 'warm' | 'cold';
+export type StageKey = 'new' | 'talking' | 'price_shared' | 'proof_shared' | 'ready';
+export const LEAD_FIELD_KEYS = [
+  'business_type',
+  'location',
+  'ads_before',
+  'goal',
+  'budget',
+  'plan',
+  'main_doubt',
+  'summary',
+] as const;
+export type LeadFieldKey = (typeof LEAD_FIELD_KEYS)[number];
+
+/** What the CRM already knows about a lead — the agent's memory. */
+export interface LeadProfile {
+  fields: Partial<Record<LeadFieldKey, string>>;
+  temperature: Temperature | null;
+  stage: StageKey | null;
+  outcome: 'lost' | 'not_a_fit' | 'silent' | 'won' | null;
+}
+
+/** What the agent learned this turn. The CRM validates every part. */
+export interface LeadUpdate {
+  fields?: Partial<Record<LeadFieldKey, string>>;
+  temperature?: Temperature;
+  stage?: StageKey;
+  outcome?: 'lost' | 'not_a_fit';
+  outcome_reason?: string;
+  note?: string;
+  deal_value?: number;
+}
+
 export interface AgentContext {
   conversation: {
     id: string;
@@ -24,6 +57,7 @@ export interface AgentContext {
   business_prompt: string | null;
   model: string | null;
   latest_customer_message_id: string | null;
+  lead: LeadProfile | null;
   messages: {
     role: 'user' | 'assistant';
     sent_by: 'customer' | 'agent' | 'bot';
@@ -56,6 +90,8 @@ export interface Crm {
   handoff(conversationId: string, summary: string | null): Promise<void>;
   typing(conversationId: string): Promise<void>;
   knowledge(query: string): Promise<string[]>;
+  updateLead(conversationId: string, update: LeadUpdate): Promise<string[]>;
+  silentSweep(afterHours: number): Promise<{ checked: number; marked: number }>;
 }
 
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -113,5 +149,11 @@ export function createCrmClient(
       );
       return data?.excerpts ?? [];
     },
+    updateLead: async (id, update) => {
+      const data = await call<{ applied: string[] }>('POST', `${conv(id)}/lead`, update);
+      return data?.applied ?? [];
+    },
+    silentSweep: (afterHours) =>
+      call<{ checked: number; marked: number }>('POST', '/silent-sweep', { after_hours: afterHours }),
   };
 }

@@ -96,6 +96,7 @@ describe('brain', () => {
     expect(parseDecision('{"action":"reply","messages":["Hi!","What do you sell?"]}')).toEqual({
       action: 'reply',
       messages: ['Hi!', 'What do you sell?'],
+      lead: null,
     });
     const many = parseDecision(JSON.stringify({ action: 'reply', messages: ['1', '2', '3', '4'] }));
     expect(many.messages).toEqual(['1', '2', '3']);
@@ -109,6 +110,7 @@ describe('brain', () => {
       action: 'handoff',
       summary: 'Wants a call',
       messages: ['Sure, the team will call you.'],
+      lead: null,
     });
   });
 
@@ -116,6 +118,7 @@ describe('brain', () => {
     expect(parseDecision('Hey!\n\nWhat business do you run?')).toEqual({
       action: 'reply',
       messages: ['Hey!', 'What business do you run?'],
+      lead: null,
     });
     expect(parseDecision('[[HANDOFF]]').action).toBe('handoff');
     expect(parseDecision('').action).toBe('handoff');
@@ -173,6 +176,7 @@ function context(overrides: Partial<AgentContext> = {}): AgentContext {
     business_prompt: 'We run Meta Ads.',
     model: 'gpt-test',
     latest_customer_message_id: 'wamid.9',
+    lead: null,
     messages: [{ role: 'user', sent_by: 'customer', content_type: 'text', content: 'META', at: '' }],
     ...overrides,
   };
@@ -185,6 +189,8 @@ function fakeCrm(ctx: AgentContext): Crm & { [k: string]: ReturnType<typeof vi.f
     handoff: vi.fn().mockResolvedValue(undefined),
     typing: vi.fn().mockResolvedValue(undefined),
     knowledge: vi.fn().mockResolvedValue(['Starter plan: ₹3,000/month']),
+    updateLead: vi.fn().mockResolvedValue(['fields']),
+    silentSweep: vi.fn().mockResolvedValue({ checked: 0, marked: 0 }),
   };
 }
 
@@ -272,6 +278,76 @@ describe('runTurn', () => {
     const crm = fakeCrm(context());
     crm.knowledge.mockRejectedValue(new Error('down'));
     expect(await runTurn(deps(crm, '{"action":"reply","messages":["Hi"]}'), 'c1')).toBe('replied');
+  });
+});
+
+describe('lead tracking', () => {
+  const withLead = (action: 'reply' | 'handoff', lead: unknown, extra = '') =>
+    `{"action":"${action}","messages":["Nice, boutiques do well on Instagram."]${extra},"lead":${JSON.stringify(lead)}}`;
+
+  it('parses the lead object from the model, ignoring a non-object', () => {
+    const lead = { fields: { business_type: 'Boutique' }, temperature: 'warm', stage: 'talking' };
+    expect(parseDecision(withLead('reply', lead)).lead).toEqual(lead);
+    expect(parseDecision(withLead('reply', 'nope')).lead).toBeNull();
+    expect(parseDecision(withLead('reply', [1])).lead).toBeNull();
+  });
+
+  it('shows what is already known in the prompt, and asks for lead tracking', () => {
+    const p = buildSystemPrompt({
+      businessPrompt: null,
+      knowledge: [],
+      contactName: null,
+      lead: {
+        fields: { business_type: 'Boutique', location: 'Kochi' },
+        temperature: 'warm',
+        stage: 'price_shared',
+        outcome: null,
+      },
+    });
+    expect(p).toContain("don't ask again");
+    expect(p).toContain('- Business type: Boutique');
+    expect(p).toContain('- Location: Kochi');
+    expect(p).toContain('- Sales stage: Price shared');
+    expect(p).toContain('Lead tracking');
+    // Nothing known yet → no memory block.
+    const empty = buildSystemPrompt({ businessPrompt: null, knowledge: [], contactName: null, lead: null });
+    expect(empty).not.toContain("don't ask again");
+  });
+
+  it('saves the lead details to the CRM after replying', async () => {
+    const crm = fakeCrm(context());
+    const lead = { fields: { business_type: 'Boutique' }, temperature: 'warm', stage: 'talking' };
+    expect(await runTurn(deps(crm, withLead('reply', lead)), 'c1')).toBe('replied');
+    expect(crm.updateLead).toHaveBeenCalledWith('c1', lead);
+    // Reply first, CRM second: the lead never waits on the CRM update.
+    expect(crm.reply.mock.invocationCallOrder[0]).toBeLessThan(crm.updateLead.mock.invocationCallOrder[0]);
+  });
+
+  it('adds the handoff summary as a note on handoff', async () => {
+    const crm = fakeCrm(context());
+    const out = withLead('handoff', { temperature: 'hot', stage: 'ready' }, ',"summary":"Ready to start Starter"');
+    expect(await runTurn(deps(crm, out), 'c1')).toBe('handed_off');
+    expect(crm.updateLead).toHaveBeenCalledWith('c1', {
+      temperature: 'hot',
+      stage: 'ready',
+      note: 'Handed to the team: Ready to start Starter',
+    });
+  });
+
+  it('still counts the turn as replied when the CRM update fails', async () => {
+    const crm = fakeCrm(context());
+    crm.updateLead.mockRejectedValue(new Error('CRM down'));
+    expect(await runTurn(deps(crm, withLead('reply', { temperature: 'cold' })), 'c1')).toBe('replied');
+  });
+
+  it('skips the update when the model reported nothing, or the reply went stale', async () => {
+    const crm = fakeCrm(context());
+    await runTurn(deps(crm, '{"action":"reply","messages":["Hi"]}'), 'c1');
+    expect(crm.updateLead).not.toHaveBeenCalled();
+
+    crm.reply.mockRejectedValue(new CrmError(409, 'conflict', 'stale: newer message'));
+    await runTurn(deps(crm, withLead('reply', { temperature: 'hot' })), 'c1');
+    expect(crm.updateLead).not.toHaveBeenCalled();
   });
 });
 
